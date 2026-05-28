@@ -1,0 +1,38 @@
+services:
+
+  jarvis:
+    build: .
+    container_name: jarvis-server
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - HA_URL=http://homeassistant:8123
+      - HA_TOKEN=${HA_TOKEN}
+      - PORT=3000
+    depends_on:
+      homeassistant:
+        condition: service_healthy
+
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    restart: unless-stopped
+    privileged: true
+    ports:
+      - "8123:8123"
+    volumes:
+      - ha_config:/config
+    environment:
+      - TZ=${TZ:-America/Sao_Paulo}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8123/api/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+volumes:
+  ha_config:
+    driver: local
