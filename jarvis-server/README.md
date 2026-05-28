@@ -104,36 +104,53 @@ docker run --rm \
 
 ---
 
-## Opção 2 — Deploy no Render (Docker)
+## Opção 2 — Deploy no Railway
 
-O Render suporta deploy via `Dockerfile`. O `docker-compose.yml` é usado localmente; no Render, cada serviço vira um **Web Service** separado.
+O Railway detecta o `railway.toml` e faz o deploy via `Dockerfile` automaticamente.  
+O plano gratuito dá **$5 de crédito/mês** — suficiente para rodar o jarvis-server 24/7.
 
 ### Passo a passo
 
-#### 2.1 Home Assistant no Render
+#### 2.1 Jarvis Server no Railway
 
-> O Render não suporta `privileged: true` necessário para o HA completo.  
-> Para produção, rode o HA em uma VPS (Oracle Cloud Free Tier, por exemplo) e aponte `HA_URL` para o IP público.
-
-#### 2.2 Jarvis Server no Render
-
-1. Faça push deste repositório no GitHub
-2. No Render → **New → Web Service**
-3. Selecione o repositório e configure:
-   - **Environment:** Docker
-   - **Dockerfile Path:** `./Dockerfile`
-   - **Instance Type:** Free
-4. Em **Environment Variables**, adicione:
+1. Acesse [railway.app](https://railway.app) e faça login com o GitHub
+2. Clique em **New Project → Deploy from GitHub repo**
+3. Selecione este repositório
+4. O Railway detecta o `Dockerfile` automaticamente e inicia o build
+5. Vá em **Variables** e adicione:
    ```
    OPENAI_API_KEY = sk-...
    HA_URL         = https://seu-homeassistant.duckdns.org
    HA_TOKEN       = seu_token_aqui
    ```
-5. Clique em **Create Web Service**
+6. Vá em **Settings → Networking → Generate Domain** para obter a URL pública
 
-#### 2.3 Manter o servidor acordado (plano gratuito)
+#### 2.2 Home Assistant no Railway
 
-Cadastre `https://seu-servidor.onrender.com/ping` no [UptimeRobot](https://uptimerobot.com) com intervalo de **5 minutos**.
+1. No mesmo projeto, clique em **New → Empty Service**
+2. Em **Source**, use a imagem:
+   ```
+   ghcr.io/home-assistant/home-assistant:stable
+   ```
+3. Em **Variables**, adicione:
+   ```
+   TZ = America/Sao_Paulo
+   ```
+4. Em **Settings → Networking**, exponha a porta `8123` e gere um domínio público
+5. Acesse o domínio público, finalize o onboarding e gere o token de longa duração
+6. Copie o token e adicione como `HA_TOKEN` nas variáveis do serviço `jarvis`
+7. Em `HA_URL` do jarvis, use a URL interna do Railway (sem expor publicamente):
+   - Railway conecta serviços do mesmo projeto via variável de referência:
+   ```
+   HA_URL = http://${{homeassistant.RAILWAY_PRIVATE_DOMAIN}}:8123
+   ```
+
+#### 2.3 Volume persistente para o HA
+
+1. No serviço do Home Assistant, vá em **Settings → Volumes**
+2. Clique em **Add Volume**
+3. Mount path: `/config`
+4. O Railway persiste os dados entre deploys automaticamente
 
 ---
 
@@ -156,7 +173,7 @@ npm run dev        # desenvolvimento com hot-reload
 2. Crie uma nova Skill do tipo **Custom**
 3. Em **Endpoint**, selecione **HTTPS** e cole:
    ```
-   https://seu-servidor.onrender.com/alexa
+   https://seu-servidor.up.railway.app/alexa
    ```
 4. Crie um Intent com um slot chamado `texto` do tipo `AMAZON.SearchQuery`
 5. Treine e publique a Skill
@@ -169,7 +186,8 @@ npm run dev        # desenvolvimento com hot-reload
 jarvis-server/
 ├── index.js            # Servidor principal
 ├── Dockerfile          # Imagem do jarvis-server
-├── docker-compose.yml  # Sobe jarvis + Home Assistant juntos
+├── docker-compose.yml  # Sobe jarvis + Home Assistant juntos (local/VPS)
+├── railway.toml        # Configuração de deploy no Railway
 ├── package.json
 ├── .env.example
 ├── .gitignore
