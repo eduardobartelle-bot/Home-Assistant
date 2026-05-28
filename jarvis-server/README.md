@@ -13,10 +13,10 @@ Cron / UptimeRobot → GET /ping → mantém servidor vivo
 ## Endpoints
 
 ### `GET /ping`
-Retorna `{"status":"ok"}`. Use para health check e para manter o servidor acordado (UptimeRobot, cron-job.org).
+Retorna `{"status":"ok"}`. Use para health check e para manter o servidor acordado.
 
 ### `POST /alexa`
-Recebe o webhook da Alexa Skill, extrai o texto falado, consulta o ChatGPT com o system prompt do Jarvis e retorna a resposta no formato Alexa.
+Recebe o webhook da Alexa Skill, extrai o texto falado, consulta o ChatGPT e retorna a resposta no formato Alexa.
 
 **Body esperado (enviado automaticamente pela Alexa):**
 ```json
@@ -27,17 +27,6 @@ Recebe o webhook da Alexa Skill, extrai o texto falado, consulta o ChatGPT com o
         "texto": { "value": "ligue a luz da sala" }
       }
     }
-  }
-}
-```
-
-**Resposta:**
-```json
-{
-  "version": "1.0",
-  "response": {
-    "outputSpeech": { "type": "PlainText", "text": "Luz da sala ligada." },
-    "shouldEndSession": false
   }
 }
 ```
@@ -54,88 +43,135 @@ Repassa comandos para o Home Assistant via REST API.
 }
 ```
 
-**Resposta:**
-```json
-{ "success": true, "result": { ... } }
-```
-
 ## Variáveis de ambiente
 
 | Variável | Descrição |
 |---|---|
 | `OPENAI_API_KEY` | Chave da API da OpenAI |
-| `HA_URL` | URL base do Home Assistant (ex: `http://192.168.1.100:8123`) |
 | `HA_TOKEN` | Token de longa duração do Home Assistant |
-| `PORT` | Porta do servidor (Render define automaticamente) |
+| `TZ` | Fuso horário (padrão: `America/Sao_Paulo`) |
+| `PORT` | Porta do jarvis-server (apenas sem Docker; padrão: `3000`) |
 
-## Como configurar e deployar no Render
+> Com `docker-compose`, `HA_URL` é definido automaticamente como `http://homeassistant:8123` — não precisa configurar.
 
-### 1. Pré-requisitos
-- Conta no [Render](https://render.com) (plano gratuito funciona)
-- Chave da OpenAI: [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
-- Token do Home Assistant: **Perfil → Segurança → Tokens de acesso de longa duração**
+---
 
-### 2. Deploy no Render
+## Opção 1 — Docker Compose (local ou VPS)
 
-1. Faça fork ou clone deste repositório no GitHub
-2. No Render, clique em **New → Web Service**
-3. Conecte seu repositório GitHub
-4. Configure:
-   - **Build Command:** `npm install`
-   - **Start Command:** `npm start`
+### Pré-requisitos
+- Docker e Docker Compose instalados
+
+### Subir tudo com um comando
+
+```bash
+# Clone o repositório
+git clone https://github.com/seu-usuario/jarvis-server.git
+cd jarvis-server
+
+# Configure as variáveis
+cp .env.example .env
+# Edite o .env com OPENAI_API_KEY e HA_TOKEN
+
+# Suba os dois serviços
+docker compose up -d
+```
+
+Acesse o Home Assistant em `http://localhost:8123` e finalize o onboarding para gerar o **token de longa duração**.  
+Depois adicione o token no `.env` e reinicie:
+
+```bash
+docker compose restart jarvis
+```
+
+### Parar / remover
+
+```bash
+docker compose down        # para os containers
+docker compose down -v     # para e apaga o volume do HA (cuidado!)
+```
+
+### Volume persistente
+
+Os dados do Home Assistant ficam no volume Docker `ha_config`.  
+Para fazer backup:
+
+```bash
+docker run --rm \
+  -v jarvis-server_ha_config:/data \
+  -v $(pwd):/backup \
+  alpine tar czf /backup/ha_backup.tar.gz /data
+```
+
+---
+
+## Opção 2 — Deploy no Render (Docker)
+
+O Render suporta deploy via `Dockerfile`. O `docker-compose.yml` é usado localmente; no Render, cada serviço vira um **Web Service** separado.
+
+### Passo a passo
+
+#### 2.1 Home Assistant no Render
+
+> O Render não suporta `privileged: true` necessário para o HA completo.  
+> Para produção, rode o HA em uma VPS (Oracle Cloud Free Tier, por exemplo) e aponte `HA_URL` para o IP público.
+
+#### 2.2 Jarvis Server no Render
+
+1. Faça push deste repositório no GitHub
+2. No Render → **New → Web Service**
+3. Selecione o repositório e configure:
+   - **Environment:** Docker
+   - **Dockerfile Path:** `./Dockerfile`
    - **Instance Type:** Free
-5. Em **Environment Variables**, adicione:
+4. Em **Environment Variables**, adicione:
    ```
    OPENAI_API_KEY = sk-...
-   HA_URL         = http://SEU_IP_DO_HA:8123
+   HA_URL         = https://seu-homeassistant.duckdns.org
    HA_TOKEN       = seu_token_aqui
    ```
-6. Clique em **Create Web Service**
+5. Clique em **Create Web Service**
 
-O Render vai gerar uma URL pública como `https://jarvis-server-xxxx.onrender.com`.
+#### 2.3 Manter o servidor acordado (plano gratuito)
 
-### 3. Manter o servidor acordado (plano gratuito)
+Cadastre `https://seu-servidor.onrender.com/ping` no [UptimeRobot](https://uptimerobot.com) com intervalo de **5 minutos**.
 
-O plano gratuito do Render hiberna após 15 minutos de inatividade. Para evitar:
+---
 
-- Cadastre a URL `https://seu-servidor.onrender.com/ping` no [UptimeRobot](https://uptimerobot.com) com intervalo de **5 minutos** (gratuito)
-- Ou use o [cron-job.org](https://cron-job.org) para fazer GET `/ping` a cada 5 minutos
+## Opção 3 — Node.js direto (sem Docker)
 
-### 4. Configurar a Alexa Skill
+```bash
+npm install
+cp .env.example .env
+# edite o .env com todas as variáveis, incluindo HA_URL
+
+npm start          # produção
+npm run dev        # desenvolvimento com hot-reload
+```
+
+---
+
+## Configurar a Alexa Skill
 
 1. Acesse o [Alexa Developer Console](https://developer.amazon.com/alexa/console/ask)
 2. Crie uma nova Skill do tipo **Custom**
-3. Em **Endpoint**, selecione **HTTPS** e cole a URL:
+3. Em **Endpoint**, selecione **HTTPS** e cole:
    ```
    https://seu-servidor.onrender.com/alexa
    ```
 4. Crie um Intent com um slot chamado `texto` do tipo `AMAZON.SearchQuery`
 5. Treine e publique a Skill
 
-## Executar localmente
-
-```bash
-# Instalar dependências
-npm install
-
-# Criar arquivo .env baseado no exemplo
-cp .env.example .env
-# edite o .env com suas credenciais
-
-# Iniciar em modo desenvolvimento
-npm run dev
-
-# Iniciar em produção
-npm start
-```
+---
 
 ## Estrutura do projeto
 
 ```
 jarvis-server/
-├── index.js        # Servidor principal
+├── index.js            # Servidor principal
+├── Dockerfile          # Imagem do jarvis-server
+├── docker-compose.yml  # Sobe jarvis + Home Assistant juntos
 ├── package.json
-├── .env.example    # Modelo de variáveis de ambiente
+├── .env.example
 ├── .gitignore
 └── README.md
 ```
