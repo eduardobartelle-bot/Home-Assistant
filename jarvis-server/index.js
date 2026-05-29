@@ -341,35 +341,56 @@ async function responder(text, endSession) {
   return alexaResponse(text, endSession);
 }
 
+// Diretiva que reabre o microfone e captura QUALQUER fala como o slot "query",
+// sem precisar de palavra-âncora. É o que permite conversa livre e contínua.
+function elicitDirective() {
+  return [
+    {
+      type: 'Dialog.ElicitSlot',
+      slotToElicit: 'query',
+      updatedIntent: {
+        name: 'ComandoIntent',
+        confirmationStatus: 'NONE',
+        slots: {
+          query: { name: 'query', confirmationStatus: 'NONE' },
+        },
+      },
+    },
+  ];
+}
+
 function alexaResponse(text, endSession = false) {
-  return {
+  const response = {
     version: '1.0',
     response: {
-      outputSpeech: {
-        type: 'PlainText',
-        text,
-      },
+      outputSpeech: { type: 'PlainText', text },
       shouldEndSession: endSession,
     },
   };
+  if (!endSession) {
+    response.response.directives = elicitDirective();
+    response.response.reprompt = { outputSpeech: { type: 'PlainText', text: 'Ainda estou aqui. O que deseja?' } };
+  }
+  return response;
 }
 
 function alexaAudioResponse(audioUrl, fallbackText, endSession = false) {
-  return {
+  const response = {
     version: '1.0',
     response: {
       outputSpeech: {
         type: 'SSML',
         ssml: `<speak><audio src="${audioUrl}"/></speak>`,
       },
-      card: {
-        type: 'Simple',
-        title: 'Nero',
-        content: fallbackText,
-      },
+      card: { type: 'Simple', title: 'Nero', content: fallbackText },
       shouldEndSession: endSession,
     },
   };
+  if (!endSession) {
+    response.response.directives = elicitDirective();
+    response.response.reprompt = { outputSpeech: { type: 'PlainText', text: 'Ainda estou aqui. O que deseja?' } };
+  }
+  return response;
 }
 
 app.listen(PORT, () => {
