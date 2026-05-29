@@ -6,6 +6,8 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
+const { createClient } = require('@supabase/supabase-js');
+
 const app = express();
 app.use(express.json());
 
@@ -20,6 +22,66 @@ fs.mkdirSync(AUDIO_DIR, { recursive: true });
 
 app.use('/audio', express.static(AUDIO_DIR));
 
+const SYSTEM_PROMPT =
+  'Você é Nero, um assistente doméstico inteligente e amigável. ' +
+  'Responda de forma curta, natural e direta, como numa conversa por voz. ' +
+  'Você lembra do contexto da conversa: se o usuário disser "apaga ela" logo após falar de uma luz, ' +
+  'entenda a que dispositivo ele se refere a partir das mensagens anteriores. ' +
+  'Quando o usuário pedir para controlar algum dispositivo da casa, use a função controlar_home_assistant. ' +
+  'Após executar um comando, confirme brevemente o que foi feito.';
+
+// ---------- Memória de conversa (Supabase, com fallback em memória local) ----------
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
+const MAX_MENSAGENS = 20; // mantém as últimas 10 trocas (usuário + assistente)
+
+let supabase = null;
+if (SUPABASE_URL && SUPABASE_KEY) {
+  supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+  process.stdout.write('Memória: Supabase conectado\n');
+} else {
+  process.stdout.write('Memória: Supabase não configurado, usando memória local (some ao reiniciar)\n');
+}
+
+const memoriaLocal = new Map();
+
+async function carregarHistorico(userId) {
+  if (!userId) return [];
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('conversas')
+        .select('mensagens')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (error) throw error;
+      return data?.mensagens || [];
+    } catch (err) {
+      process.stdout.write(`Memória ERRO (carregar): ${err.message}\n`);
+      return [];
+    }
+  }
+  return memoriaLocal.get(userId) || [];
+}
+
+async function salvarHistorico(userId, mensagens) {
+  if (!userId) return;
+  const recorte = mensagens.slice(-MAX_MENSAGENS);
+  if (supabase) {
+    try {
+      const { error } = await supabase
+        .from('conversas')
+        .upsert({ user_id: userId, mensagens: recorte, atualizado_em: new Date().toISOString() });
+      if (error) throw error;
+    } catch (err) {
+      process.stdout.write(`Memória ERRO (salvar): ${err.message}\n`);
+    }
+  } else {
+    memoriaLocal.set(userId, recorte);
+  }
+}
+
+// ---------- Ferramenta de controle do Home Assistant ----------
 const tools = [
   {
     type: 'function',
@@ -52,6 +114,7 @@ const tools = [
   },
 ];
 
+// ---------- Geração de voz (ElevenLabs + transcodificação pro formato Alexa) ----------
 async function gerarAudio(texto) {
   if (!ELEVENLABS_API_KEY) {
     process.stdout.write('ElevenLabs: API key não configurada\n');
@@ -129,6 +192,69 @@ async function chamarHomeAssistant(endpoint, method, data) {
   return response.data;
 }
 
+// ---------- Conversa com o GPT (com memória + function calling) ----------
+async function conversarComGPT(userId, userText) {
+  const historico = await carregarHistorico(userId);
+
+  const messages = [
+    { role: 'system', content: SYSTEM_PROMPT },
+    ...historico,
+    { role: 'user', content: userText },
+  ];
+
+  let response = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    messages,
+    tools,
+    tool_choice: 'auto',
+    max_tokens: 300,
+  });
+
+  let assistantMessage = response.choices[0].message;
+
+  if (assistantMessage.tool_calls?.length > 0) {
+    messages.push(assistantMessage);
+
+    for (const toolCall of assistantMessage.tool_calls) {
+      const args = JSON.parse(toolCall.function.arguments);
+      let resultado;
+
+      try {
+        resultado = await chamarHomeAssistant(args.endpoint, args.method, args.data);
+      } catch (err) {
+        resultado = { erro: err.message };
+      }
+
+      messages.push({
+        role: 'tool',
+        tool_call_id: toolCall.id,
+        content: JSON.stringify(resultado),
+      });
+    }
+
+    response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages,
+      max_tokens: 150,
+    });
+
+    assistantMessage = response.choices[0].message;
+  }
+
+  const reply = assistantMessage.content?.trim() || 'Feito.';
+
+  // Salva apenas as trocas de texto (sem os detalhes internos das tool calls).
+  const novoHistorico = [
+    ...historico,
+    { role: 'user', content: userText },
+    { role: 'assistant', content: reply },
+  ];
+  await salvarHistorico(userId, novoHistorico);
+
+  return reply;
+}
+
+// ---------- Endpoints ----------
 app.get('/ping', (req, res) => {
   res.json({ status: 'ok' });
 });
@@ -137,85 +263,52 @@ app.post('/alexa', async (req, res) => {
   try {
     const body = req.body;
     const requestType = body?.request?.type;
+    const userId = body?.session?.user?.userId || 'anon';
 
-    // Usuário abriu a skill sem falar nada
+    // Sessão encerrada pelo Alexa (silêncio, erro etc.)
+    if (requestType === 'SessionEndedRequest') {
+      return res.json({ version: '1.0', response: {} });
+    }
+
+    // Usuário abriu a skill ("Alexa, abrir nero home")
     if (requestType === 'LaunchRequest') {
-      const audioUrl = await gerarAudio('Olá, sou o Nero. Como posso ajudar?');
-      if (audioUrl) return res.json(alexaAudioResponse(audioUrl, 'Olá, sou o Nero. Como posso ajudar?'));
-      return res.json(alexaResponse('Olá, sou o Nero. Como posso ajudar?'));
+      return res.json(await responder('Olá, sou o Nero. Como posso ajudar?', false));
     }
 
-    const userText =
-      body?.request?.intent?.slots?.texto?.value ||
-      body?.request?.intent?.slots?.query?.value ||
-      body?.request?.intent?.slots?.command?.value ||
-      '';
+    if (requestType === 'IntentRequest') {
+      const intentName = body?.request?.intent?.name;
 
-    if (!userText) {
-      return res.json(alexaResponse('Não entendi o que você disse. Pode repetir?'));
-    }
-
-    const messages = [
-      {
-        role: 'system',
-        content:
-          'Você é Jarvis, assistente doméstico inteligente. Responda de forma curta e direta. ' +
-          'Quando o usuário pedir para controlar algum dispositivo da casa, use a função controlar_home_assistant. ' +
-          'Após executar um comando, confirme brevemente o que foi feito.',
-      },
-      { role: 'user', content: userText },
-    ];
-
-    let response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages,
-      tools,
-      tool_choice: 'auto',
-      max_tokens: 300,
-    });
-
-    let assistantMessage = response.choices[0].message;
-
-    if (assistantMessage.tool_calls?.length > 0) {
-      messages.push(assistantMessage);
-
-      for (const toolCall of assistantMessage.tool_calls) {
-        const args = JSON.parse(toolCall.function.arguments);
-        let resultado;
-
-        try {
-          resultado = await chamarHomeAssistant(args.endpoint, args.method, args.data);
-        } catch (err) {
-          resultado = { erro: err.message };
-        }
-
-        messages.push({
-          role: 'tool',
-          tool_call_id: toolCall.id,
-          content: JSON.stringify(resultado),
-        });
+      // Encerrar conversa
+      if (intentName === 'AMAZON.StopIntent' || intentName === 'AMAZON.CancelIntent') {
+        return res.json(await responder('Até logo!', true));
       }
 
-      response = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages,
-        max_tokens: 150,
-      });
+      // Ajuda
+      if (intentName === 'AMAZON.HelpIntent') {
+        return res.json(
+          await responder('Pode me pedir para controlar a casa ou conversar sobre qualquer assunto. O que deseja?', false)
+        );
+      }
 
-      assistantMessage = response.choices[0].message;
+      const userText =
+        body?.request?.intent?.slots?.query?.value ||
+        body?.request?.intent?.slots?.texto?.value ||
+        body?.request?.intent?.slots?.command?.value ||
+        '';
+
+      // FallbackIntent ou fala não reconhecida: pede pra repetir mas mantém a sessão aberta
+      if (!userText) {
+        return res.json(await responder('Não entendi. Pode repetir?', false));
+      }
+
+      const reply = await conversarComGPT(userId, userText);
+      return res.json(await responder(reply, false));
     }
 
-    const reply = assistantMessage.content?.trim() || 'Feito.';
-    const audioUrl = await gerarAudio(reply);
-
-    if (audioUrl) {
-      return res.json(alexaAudioResponse(audioUrl, reply));
-    }
-
-    return res.json(alexaResponse(reply));
+    return res.json(await responder('Não entendi. Pode repetir?', false));
   } catch (err) {
     console.error('Erro no /alexa:', err.message);
-    return res.json(alexaResponse('Ocorreu um erro ao processar sua solicitação.'));
+    return res.json(alexaResponse('Ocorreu um erro ao processar sua solicitação.', false));
   }
 });
 
@@ -236,7 +329,14 @@ app.post('/home', async (req, res) => {
   }
 });
 
-function alexaResponse(text) {
+// ---------- Montagem das respostas Alexa ----------
+async function responder(text, endSession) {
+  const audioUrl = await gerarAudio(text);
+  if (audioUrl) return alexaAudioResponse(audioUrl, text, endSession);
+  return alexaResponse(text, endSession);
+}
+
+function alexaResponse(text, endSession = false) {
   return {
     version: '1.0',
     response: {
@@ -244,12 +344,12 @@ function alexaResponse(text) {
         type: 'PlainText',
         text,
       },
-      shouldEndSession: false,
+      shouldEndSession: endSession,
     },
   };
 }
 
-function alexaAudioResponse(audioUrl, fallbackText) {
+function alexaAudioResponse(audioUrl, fallbackText, endSession = false) {
   return {
     version: '1.0',
     response: {
@@ -259,10 +359,10 @@ function alexaAudioResponse(audioUrl, fallbackText) {
       },
       card: {
         type: 'Simple',
-        title: 'Jarvis',
+        title: 'Nero',
         content: fallbackText,
       },
-      shouldEndSession: false,
+      shouldEndSession: endSession,
     },
   };
 }
