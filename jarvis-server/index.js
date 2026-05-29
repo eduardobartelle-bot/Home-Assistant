@@ -2,12 +2,25 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const OpenAI = require('openai');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 app.use(express.json());
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PORT = process.env.PORT || 3000;
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'pNInz6obpgDQGcFmaJgB'; // voz padrão Adam
+const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
+
+// Pasta pra guardar os MP3 gerados temporariamente
+const AUDIO_DIR = path.join(__dirname, 'public', 'audio');
+fs.mkdirSync(AUDIO_DIR, { recursive: true });
+
+// Serve os arquivos de áudio publicamente
+app.use('/audio', express.static(AUDIO_DIR));
 
 // Ferramentas que o GPT pode chamar
 const tools = [
@@ -41,6 +54,45 @@ const tools = [
     },
   },
 ];
+
+// Gera áudio com ElevenLabs e retorna a URL pública
+async function gerarAudio(texto) {
+  if (!ELEVENLABS_API_KEY) return null;
+
+  try {
+    const response = await axios.post(
+      `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`,
+      {
+        text: texto,
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+        },
+      },
+      {
+        headers: {
+          'xi-api-key': ELEVENLABS_API_KEY,
+          'Content-Type': 'application/json',
+          Accept: 'audio/mpeg',
+        },
+        responseType: 'arraybuffer',
+      }
+    );
+
+    const filename = `${crypto.randomUUID()}.mp3`;
+    const filepath = path.join(AUDIO_DIR, filename);
+    fs.writeFileSync(filepath, response.data);
+
+    // Apaga o arquivo após 60 segundos
+    setTimeout(() => fs.unlink(filepath, () => {}), 60000);
+
+    return `${PUBLIC_URL}/audio/${filename}`;
+  } catch (err) {
+    console.error('Erro no ElevenLabs:', err.message);
+    return null;
+  }
+}
 
 // Chama o Home Assistant
 async function chamarHomeAssistant(endpoint, method, data) {
@@ -91,7 +143,6 @@ app.post('/alexa', async (req, res) => {
       { role: 'user', content: userText },
     ];
 
-    // Primeira chamada — GPT decide se usa function ou responde direto
     let response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages,
@@ -102,7 +153,6 @@ app.post('/alexa', async (req, res) => {
 
     let assistantMessage = response.choices[0].message;
 
-    // GPT quer chamar o Home Assistant
     if (assistantMessage.tool_calls?.length > 0) {
       messages.push(assistantMessage);
 
@@ -123,7 +173,6 @@ app.post('/alexa', async (req, res) => {
         });
       }
 
-      // Segunda chamada — GPT formula a resposta final com o resultado do HA
       response = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages,
@@ -134,6 +183,14 @@ app.post('/alexa', async (req, res) => {
     }
 
     const reply = assistantMessage.content?.trim() || 'Feito.';
+
+    // Tenta gerar áudio com ElevenLabs
+    const audioUrl = await gerarAudio(reply);
+
+    if (audioUrl) {
+      return res.json(alexaAudioResponse(audioUrl, reply));
+    }
+
     return res.json(alexaResponse(reply));
   } catch (err) {
     console.error('Erro no /alexa:', err.message);
@@ -159,6 +216,7 @@ app.post('/home', async (req, res) => {
   }
 });
 
+// Resposta de texto simples pra Alexa
 function alexaResponse(text) {
   return {
     version: '1.0',
@@ -166,6 +224,25 @@ function alexaResponse(text) {
       outputSpeech: {
         type: 'PlainText',
         text,
+      },
+      shouldEndSession: false,
+    },
+  };
+}
+
+// Resposta com áudio do ElevenLabs pra Alexa
+function alexaAudioResponse(audioUrl, fallbackText) {
+  return {
+    version: '1.0',
+    response: {
+      outputSpeech: {
+        type: 'SSML',
+        ssml: `<speak><audio src="${audioUrl}"/></speak>`,
+      },
+      card: {
+        type: 'Simple',
+        title: 'Jarvis',
+        content: fallbackText,
       },
       shouldEndSession: false,
     },
