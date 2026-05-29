@@ -37,7 +37,10 @@ const MAX_MENSAGENS = 20; // mantém as últimas 10 trocas (usuário + assistent
 
 let supabase = null;
 if (SUPABASE_URL && SUPABASE_KEY) {
-  supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+  supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+    auth: { persistSession: false },
+    realtime: { enabled: false },
+  });
   process.stdout.write('Memória: Supabase conectado\n');
 } else {
   process.stdout.write('Memória: Supabase não configurado, usando memória local (some ao reiniciar)\n');
