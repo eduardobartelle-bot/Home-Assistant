@@ -2,14 +2,24 @@ require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
 const OpenAI = require('openai');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
 
 const app = express();
 app.use(express.json());
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PORT = process.env.PORT || 3000;
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'pNInz6obpgDQGcFmaJgB';
+const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
 
-// Ferramentas que o GPT pode chamar
+const AUDIO_DIR = path.join(__dirname, 'public', 'audio');
+fs.mkdirSync(AUDIO_DIR, { recursive: true });
+
+app.use('/audio', express.static(AUDIO_DIR));
+
 const tools = [
   {
     type: 'function',
@@ -42,7 +52,43 @@ const tools = [
   },
 ];
 
-// Chama o Home Assistant
+async function gerarAudio(texto) {
+  if (!ELEVENLABS_API_KEY) return null;
+
+  try {
+    const response = await axios.post(
+      `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`,
+      {
+        text: texto,
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+        },
+      },
+      {
+        headers: {
+          'xi-api-key': ELEVENLABS_API_KEY,
+          'Content-Type': 'application/json',
+          Accept: 'audio/mpeg',
+        },
+        responseType: 'arraybuffer',
+      }
+    );
+
+    const filename = `${crypto.randomUUID()}.mp3`;
+    const filepath = path.join(AUDIO_DIR, filename);
+    fs.writeFileSync(filepath, response.data);
+
+    setTimeout(() => fs.unlink(filepath, () => {}), 60000);
+
+    return `${PUBLIC_URL}/audio/${filename}`;
+  } catch (err) {
+    console.error('Erro no ElevenLabs:', err.message);
+    return null;
+  }
+}
+
 async function chamarHomeAssistant(endpoint, method, data) {
   const haUrl = process.env.HA_URL?.replace(/\/$/, '');
   const haToken = process.env.HA_TOKEN;
@@ -60,12 +106,10 @@ async function chamarHomeAssistant(endpoint, method, data) {
   return response.data;
 }
 
-// GET /ping - health check
 app.get('/ping', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// POST /alexa - recebe webhook da Alexa Skill
 app.post('/alexa', async (req, res) => {
   try {
     const body = req.body;
@@ -91,7 +135,6 @@ app.post('/alexa', async (req, res) => {
       { role: 'user', content: userText },
     ];
 
-    // Primeira chamada — GPT decide se usa function ou responde direto
     let response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages,
@@ -102,7 +145,6 @@ app.post('/alexa', async (req, res) => {
 
     let assistantMessage = response.choices[0].message;
 
-    // GPT quer chamar o Home Assistant
     if (assistantMessage.tool_calls?.length > 0) {
       messages.push(assistantMessage);
 
@@ -123,7 +165,6 @@ app.post('/alexa', async (req, res) => {
         });
       }
 
-      // Segunda chamada — GPT formula a resposta final com o resultado do HA
       response = await openai.chat.completions.create({
         model: 'gpt-4o-mini',
         messages,
@@ -134,6 +175,12 @@ app.post('/alexa', async (req, res) => {
     }
 
     const reply = assistantMessage.content?.trim() || 'Feito.';
+    const audioUrl = await gerarAudio(reply);
+
+    if (audioUrl) {
+      return res.json(alexaAudioResponse(audioUrl, reply));
+    }
+
     return res.json(alexaResponse(reply));
   } catch (err) {
     console.error('Erro no /alexa:', err.message);
@@ -141,7 +188,6 @@ app.post('/alexa', async (req, res) => {
   }
 });
 
-// POST /home - repassa comandos diretos pro Home Assistant
 app.post('/home', async (req, res) => {
   try {
     const { endpoint, method = 'POST', data } = req.body;
@@ -166,6 +212,24 @@ function alexaResponse(text) {
       outputSpeech: {
         type: 'PlainText',
         text,
+      },
+      shouldEndSession: false,
+    },
+  };
+}
+
+function alexaAudioResponse(audioUrl, fallbackText) {
+  return {
+    version: '1.0',
+    response: {
+      outputSpeech: {
+        type: 'SSML',
+        ssml: `<speak><audio src="${audioUrl}"/></speak>`,
+      },
+      card: {
+        type: 'Simple',
+        title: 'Jarvis',
+        content: fallbackText,
       },
       shouldEndSession: false,
     },
