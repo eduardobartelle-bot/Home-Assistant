@@ -12,17 +12,14 @@ app.use(express.json());
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const PORT = process.env.PORT || 3000;
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'pNInz6obpgDQGcFmaJgB'; // voz padrão Adam
+const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || 'pNInz6obpgDQGcFmaJgB';
 const PUBLIC_URL = process.env.PUBLIC_URL || `http://localhost:${PORT}`;
 
-// Pasta pra guardar os MP3 gerados temporariamente
 const AUDIO_DIR = path.join(__dirname, 'public', 'audio');
 fs.mkdirSync(AUDIO_DIR, { recursive: true });
 
-// Serve os arquivos de áudio publicamente
 app.use('/audio', express.static(AUDIO_DIR));
 
-// Ferramentas que o GPT pode chamar
 const tools = [
   {
     type: 'function',
@@ -55,7 +52,6 @@ const tools = [
   },
 ];
 
-// Gera áudio com ElevenLabs e retorna a URL pública
 async function gerarAudio(texto) {
   if (!ELEVENLABS_API_KEY) return null;
 
@@ -84,7 +80,6 @@ async function gerarAudio(texto) {
     const filepath = path.join(AUDIO_DIR, filename);
     fs.writeFileSync(filepath, response.data);
 
-    // Apaga o arquivo após 60 segundos
     setTimeout(() => fs.unlink(filepath, () => {}), 60000);
 
     return `${PUBLIC_URL}/audio/${filename}`;
@@ -94,7 +89,6 @@ async function gerarAudio(texto) {
   }
 }
 
-// Chama o Home Assistant
 async function chamarHomeAssistant(endpoint, method, data) {
   const haUrl = process.env.HA_URL?.replace(/\/$/, '');
   const haToken = process.env.HA_TOKEN;
@@ -112,12 +106,10 @@ async function chamarHomeAssistant(endpoint, method, data) {
   return response.data;
 }
 
-// GET /ping - health check
 app.get('/ping', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// POST /alexa - recebe webhook da Alexa Skill
 app.post('/alexa', async (req, res) => {
   try {
     const body = req.body;
@@ -183,8 +175,6 @@ app.post('/alexa', async (req, res) => {
     }
 
     const reply = assistantMessage.content?.trim() || 'Feito.';
-
-    // Tenta gerar áudio com ElevenLabs
     const audioUrl = await gerarAudio(reply);
 
     if (audioUrl) {
@@ -198,7 +188,6 @@ app.post('/alexa', async (req, res) => {
   }
 });
 
-// POST /home - repassa comandos diretos pro Home Assistant
 app.post('/home', async (req, res) => {
   try {
     const { endpoint, method = 'POST', data } = req.body;
@@ -216,7 +205,6 @@ app.post('/home', async (req, res) => {
   }
 });
 
-// Resposta de texto simples pra Alexa
 function alexaResponse(text) {
   return {
     version: '1.0',
@@ -230,7 +218,6 @@ function alexaResponse(text) {
   };
 }
 
-// Resposta com áudio do ElevenLabs pra Alexa
 function alexaAudioResponse(audioUrl, fallbackText) {
   return {
     version: '1.0',
