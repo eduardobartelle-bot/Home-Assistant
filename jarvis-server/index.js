@@ -341,6 +341,24 @@ async function responder(text, endSession) {
   return alexaResponse(text, endSession);
 }
 
+// Diretiva que reabre o microfone e captura QUALQUER fala como o slot "query",
+// sem precisar de palavra-âncora. É o que permite conversa livre e contínua.
+function elicitDirective() {
+  return [
+    {
+      type: 'Dialog.ElicitSlot',
+      slotToElicit: 'query',
+      updatedIntent: {
+        name: 'ComandoIntent',
+        confirmationStatus: 'NONE',
+        slots: {
+          query: { name: 'query', confirmationStatus: 'NONE' },
+        },
+      },
+    },
+  ];
+}
+
 function alexaResponse(text, endSession = false) {
   const response = {
     version: '1.0',
@@ -350,7 +368,8 @@ function alexaResponse(text, endSession = false) {
     },
   };
   if (!endSession) {
-    response.response.reprompt = { outputSpeech: { type: 'PlainText', text: '...' } };
+    response.response.directives = elicitDirective();
+    response.response.reprompt = { outputSpeech: { type: 'PlainText', text: 'Ainda estou aqui. O que deseja?' } };
   }
   return response;
 }
@@ -368,7 +387,8 @@ function alexaAudioResponse(audioUrl, fallbackText, endSession = false) {
     },
   };
   if (!endSession) {
-    response.response.reprompt = { outputSpeech: { type: 'PlainText', text: '...' } };
+    response.response.directives = elicitDirective();
+    response.response.reprompt = { outputSpeech: { type: 'PlainText', text: 'Ainda estou aqui. O que deseja?' } };
   }
   return response;
 }
