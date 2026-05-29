@@ -211,7 +211,7 @@ async function conversarComGPT(userId, userText) {
     messages,
     tools,
     tool_choice: 'auto',
-    max_tokens: 300,
+    max_tokens: 120,
   });
 
   let assistantMessage = response.choices[0].message;
@@ -239,7 +239,7 @@ async function conversarComGPT(userId, userText) {
     response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages,
-      max_tokens: 150,
+      max_tokens: 100,
     });
 
     assistantMessage = response.choices[0].message;
