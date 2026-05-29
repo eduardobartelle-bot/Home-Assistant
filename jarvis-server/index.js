@@ -113,6 +113,14 @@ app.get('/ping', (req, res) => {
 app.post('/alexa', async (req, res) => {
   try {
     const body = req.body;
+    const requestType = body?.request?.type;
+
+    // Usuário abriu a skill sem falar nada
+    if (requestType === 'LaunchRequest') {
+      const audioUrl = await gerarAudio('Olá, sou o Nero. Como posso ajudar?');
+      if (audioUrl) return res.json(alexaAudioResponse(audioUrl, 'Olá, sou o Nero. Como posso ajudar?'));
+      return res.json(alexaResponse('Olá, sou o Nero. Como posso ajudar?'));
+    }
 
     const userText =
       body?.request?.intent?.slots?.texto?.value ||
