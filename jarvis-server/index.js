@@ -5,6 +5,7 @@ const OpenAI = require('openai');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { execFile } = require('child_process');
 const app = express();
 app.use(express.json());
 
@@ -79,9 +80,27 @@ async function gerarAudio(texto) {
       }
     );
 
-    const filename = `${crypto.randomUUID()}.mp3`;
+    const id = crypto.randomUUID();
+    const rawPath = path.join(AUDIO_DIR, `${id}-raw.mp3`);
+    const filename = `${id}.mp3`;
     const filepath = path.join(AUDIO_DIR, filename);
-    fs.writeFileSync(filepath, response.data);
+    fs.writeFileSync(rawPath, response.data);
+
+    // Alexa exige MP3 a 48 kbps, 24 kHz, mono. Transcoda com ffmpeg.
+    await new Promise((resolve, reject) => {
+      execFile(
+        'ffmpeg',
+        ['-y', '-i', rawPath, '-ac', '1', '-ar', '24000', '-b:a', '48k', '-codec:a', 'libmp3lame', filepath],
+        (err, stdout, stderr) => {
+          fs.unlink(rawPath, () => {});
+          if (err) {
+            process.stdout.write(`ffmpeg ERRO: ${stderr || err.message}\n`);
+            return reject(err);
+          }
+          resolve();
+        }
+      );
+    });
 
     setTimeout(() => fs.unlink(filepath, () => {}), 300000);
 
