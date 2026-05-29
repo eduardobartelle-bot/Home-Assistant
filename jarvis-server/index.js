@@ -342,34 +342,35 @@ async function responder(text, endSession) {
 }
 
 function alexaResponse(text, endSession = false) {
-  return {
+  const response = {
     version: '1.0',
     response: {
-      outputSpeech: {
-        type: 'PlainText',
-        text,
-      },
+      outputSpeech: { type: 'PlainText', text },
       shouldEndSession: endSession,
     },
   };
+  if (!endSession) {
+    response.response.reprompt = { outputSpeech: { type: 'PlainText', text: '...' } };
+  }
+  return response;
 }
 
 function alexaAudioResponse(audioUrl, fallbackText, endSession = false) {
-  return {
+  const response = {
     version: '1.0',
     response: {
       outputSpeech: {
         type: 'SSML',
         ssml: `<speak><audio src="${audioUrl}"/></speak>`,
       },
-      card: {
-        type: 'Simple',
-        title: 'Nero',
-        content: fallbackText,
-      },
+      card: { type: 'Simple', title: 'Nero', content: fallbackText },
       shouldEndSession: endSession,
     },
   };
+  if (!endSession) {
+    response.response.reprompt = { outputSpeech: { type: 'PlainText', text: '...' } };
+  }
+  return response;
 }
 
 app.listen(PORT, () => {
