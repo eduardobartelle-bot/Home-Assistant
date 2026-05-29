@@ -46,6 +46,37 @@
         }
       ],
       "types": []
-    }
+    },
+    "dialog": {
+      "delegationStrategy": "SKILL_RESPONSE",
+      "intents": [
+        {
+          "name": "ComandoIntent",
+          "delegationStrategy": "SKILL_RESPONSE",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery",
+              "elicitationRequired": true,
+              "confirmationRequired": false,
+              "prompts": {
+                "elicitation": "Elicit.Slot.query"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "prompts": [
+      {
+        "id": "Elicit.Slot.query",
+        "variations": [
+          {
+            "type": "PlainText",
+            "value": "O que você deseja?"
+          }
+        ]
+      }
+    ]
   }
 }
