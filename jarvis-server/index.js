@@ -52,8 +52,12 @@ const tools = [
 ];
 
 async function gerarAudio(texto) {
-  if (!ELEVENLABS_API_KEY) return null;
+  if (!ELEVENLABS_API_KEY) {
+    process.stdout.write('ElevenLabs: API key não configurada\n');
+    return null;
+  }
 
+  process.stdout.write(`ElevenLabs: gerando audio para "${texto}"\n`);
   try {
     const response = await axios.post(
       `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}`,
@@ -81,9 +85,10 @@ async function gerarAudio(texto) {
 
     setTimeout(() => fs.unlink(filepath, () => {}), 300000);
 
+    process.stdout.write(`ElevenLabs: audio gerado: ${PUBLIC_URL}/audio/${filename}\n`);
     return `${PUBLIC_URL}/audio/${filename}`;
   } catch (err) {
-    console.error('Erro no ElevenLabs:', err.message);
+    process.stdout.write(`ElevenLabs ERRO: ${err.message}\n`);
     return null;
   }
 }
