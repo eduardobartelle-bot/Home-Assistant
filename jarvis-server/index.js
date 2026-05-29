@@ -21,9 +21,15 @@ fs.mkdirSync(AUDIO_DIR, { recursive: true });
 
 app.use('/audio', express.static(AUDIO_DIR));
 
+const LIMITE_CARACTERES = 400;
+
 const SYSTEM_PROMPT =
-  'Você é Nero, um assistente doméstico inteligente e amigável. ' +
-  'Responda de forma curta, natural e direta, como numa conversa por voz. ' +
+  'Você é Nero, um assistente doméstico inteligente e amigável. Você está sendo ouvido por voz. ' +
+  `Responda em no máximo ${LIMITE_CARACTERES} caracteres. ` +
+  'Se a resposta completa for mais longa que isso, responda APENAS a primeira parte (parando num ponto natural, ' +
+  'como o fim de uma frase) e termine perguntando exatamente: "Quer que eu continue?". ' +
+  'Se o usuário disser que sim (ou "continua", "pode continuar"), continue exatamente de onde você parou, ' +
+  'sem repetir o que já foi dito, respeitando o mesmo limite de caracteres. ' +
   'Você lembra do contexto da conversa: se o usuário disser "apaga ela" logo após falar de uma luz, ' +
   'entenda a que dispositivo ele se refere a partir das mensagens anteriores. ' +
   'Quando o usuário pedir para controlar algum dispositivo da casa, use a função controlar_home_assistant. ' +
@@ -212,7 +218,7 @@ async function conversarComGPT(userId, userText) {
     messages,
     tools,
     tool_choice: 'auto',
-    max_tokens: 120,
+    max_tokens: 220,
   });
 
   let assistantMessage = response.choices[0].message;
@@ -240,13 +246,21 @@ async function conversarComGPT(userId, userText) {
     response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages,
-      max_tokens: 100,
+      max_tokens: 220,
     });
 
     assistantMessage = response.choices[0].message;
   }
 
-  const reply = assistantMessage.content?.trim() || 'Feito.';
+  let reply = assistantMessage.content?.trim() || 'Feito.';
+
+  // Corte de segurança: se passar do limite, corta num fim de frase e oferece continuar.
+  if (reply.length > LIMITE_CARACTERES && !/quer que eu continue\?$/i.test(reply)) {
+    const corte = reply.slice(0, LIMITE_CARACTERES);
+    const ultimoPonto = Math.max(corte.lastIndexOf('. '), corte.lastIndexOf('! '), corte.lastIndexOf('? '));
+    const parte = ultimoPonto > 100 ? corte.slice(0, ultimoPonto + 1) : corte;
+    reply = `${parte.trim()} Quer que eu continue?`;
+  }
 
   // Salva apenas as trocas de texto (sem os detalhes internos das tool calls).
   const novoHistorico = [
