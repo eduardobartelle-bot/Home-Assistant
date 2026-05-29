@@ -11,6 +11,9 @@ services:
       - HA_URL=http://homeassistant:8123
       - HA_TOKEN=${HA_TOKEN}
       - PORT=3000
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID}
+      - PUBLIC_URL=${PUBLIC_URL}
     depends_on:
       - homeassistant
 
