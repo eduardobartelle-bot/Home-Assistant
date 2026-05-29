@@ -4,6 +4,9 @@ services:
     build: .
     container_name: jarvis-server
     restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     ports:
       - "${PORT:-3000}:3000"
     environment:
@@ -24,6 +27,9 @@ services:
     container_name: homeassistant
     restart: unless-stopped
     privileged: true
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     ports:
       - "8123:8123"
     volumes:

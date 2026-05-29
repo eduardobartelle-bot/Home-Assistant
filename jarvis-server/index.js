@@ -49,7 +49,7 @@ async function carregarHistorico(userId) {
     try {
       const res = await axios.get(
         `${SUPABASE_URL}/rest/v1/conversas?user_id=eq.${encodeURIComponent(userId)}&select=mensagens`,
-        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, timeout: 3000 }
       );
       return res.data?.[0]?.mensagens || [];
     } catch (err) {
@@ -75,6 +75,7 @@ async function salvarHistorico(userId, mensagens) {
             'Content-Type': 'application/json',
             Prefer: 'resolution=merge-duplicates',
           },
+          timeout: 3000,
         }
       );
     } catch (err) {
@@ -211,7 +212,7 @@ async function conversarComGPT(userId, userText) {
     messages,
     tools,
     tool_choice: 'auto',
-    max_tokens: 300,
+    max_tokens: 120,
   });
 
   let assistantMessage = response.choices[0].message;
@@ -239,7 +240,7 @@ async function conversarComGPT(userId, userText) {
     response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages,
-      max_tokens: 150,
+      max_tokens: 100,
     });
 
     assistantMessage = response.choices[0].message;
