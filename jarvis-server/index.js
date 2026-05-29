@@ -5,8 +5,12 @@ const OpenAI = require('openai');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const alexaVerifier = require('alexa-verifier-middleware');
 
 const app = express();
+
+// Verifica assinatura da Alexa antes de parsear o body
+app.use('/alexa', alexaVerifier);
 app.use(express.json());
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -80,7 +84,7 @@ async function gerarAudio(texto) {
     const filepath = path.join(AUDIO_DIR, filename);
     fs.writeFileSync(filepath, response.data);
 
-    setTimeout(() => fs.unlink(filepath, () => {}), 60000);
+    setTimeout(() => fs.unlink(filepath, () => {}), 300000);
 
     return `${PUBLIC_URL}/audio/${filename}`;
   } catch (err) {
