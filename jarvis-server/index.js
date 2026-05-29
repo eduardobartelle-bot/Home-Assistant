@@ -6,7 +6,6 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execFile } = require('child_process');
-const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 app.use(express.json());
@@ -35,13 +34,9 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
 const MAX_MENSAGENS = 20; // mantém as últimas 10 trocas (usuário + assistente)
 
-let supabase = null;
-if (SUPABASE_URL && SUPABASE_KEY) {
-  supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
-    auth: { persistSession: false },
-    realtime: { enabled: false },
-  });
-  process.stdout.write('Memória: Supabase conectado\n');
+const supabaseEnabled = !!(SUPABASE_URL && SUPABASE_KEY);
+if (supabaseEnabled) {
+  process.stdout.write('Memória: Supabase configurado\n');
 } else {
   process.stdout.write('Memória: Supabase não configurado, usando memória local (some ao reiniciar)\n');
 }
@@ -50,15 +45,13 @@ const memoriaLocal = new Map();
 
 async function carregarHistorico(userId) {
   if (!userId) return [];
-  if (supabase) {
+  if (supabaseEnabled) {
     try {
-      const { data, error } = await supabase
-        .from('conversas')
-        .select('mensagens')
-        .eq('user_id', userId)
-        .maybeSingle();
-      if (error) throw error;
-      return data?.mensagens || [];
+      const res = await axios.get(
+        `${SUPABASE_URL}/rest/v1/conversas?user_id=eq.${encodeURIComponent(userId)}&select=mensagens`,
+        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+      );
+      return res.data?.[0]?.mensagens || [];
     } catch (err) {
       process.stdout.write(`Memória ERRO (carregar): ${err.message}\n`);
       return [];
@@ -70,12 +63,20 @@ async function carregarHistorico(userId) {
 async function salvarHistorico(userId, mensagens) {
   if (!userId) return;
   const recorte = mensagens.slice(-MAX_MENSAGENS);
-  if (supabase) {
+  if (supabaseEnabled) {
     try {
-      const { error } = await supabase
-        .from('conversas')
-        .upsert({ user_id: userId, mensagens: recorte, atualizado_em: new Date().toISOString() });
-      if (error) throw error;
+      await axios.post(
+        `${SUPABASE_URL}/rest/v1/conversas`,
+        { user_id: userId, mensagens: recorte, atualizado_em: new Date().toISOString() },
+        {
+          headers: {
+            apikey: SUPABASE_KEY,
+            Authorization: `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            Prefer: 'resolution=merge-duplicates',
+          },
+        }
+      );
     } catch (err) {
       process.stdout.write(`Memória ERRO (salvar): ${err.message}\n`);
     }
