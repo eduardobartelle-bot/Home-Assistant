@@ -49,7 +49,7 @@ async function carregarHistorico(userId) {
     try {
       const res = await axios.get(
         `${SUPABASE_URL}/rest/v1/conversas?user_id=eq.${encodeURIComponent(userId)}&select=mensagens`,
-        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+        { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }, timeout: 3000 }
       );
       return res.data?.[0]?.mensagens || [];
     } catch (err) {
@@ -75,6 +75,7 @@ async function salvarHistorico(userId, mensagens) {
             'Content-Type': 'application/json',
             Prefer: 'resolution=merge-duplicates',
           },
+          timeout: 3000,
         }
       );
     } catch (err) {
