@@ -5,12 +5,7 @@ const OpenAI = require('openai');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const alexaVerifier = require('alexa-verifier-middleware');
-
 const app = express();
-
-// Verifica assinatura da Alexa antes de parsear o body
-app.use('/alexa', alexaVerifier);
 app.use(express.json());
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
