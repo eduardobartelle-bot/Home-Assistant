@@ -1,0 +1,51 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "nero home",
+      "intents": [
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.FallbackIntent",
+          "samples": []
+        },
+        {
+          "name": "ComandoIntent",
+          "slots": [
+            {
+              "name": "query",
+              "type": "AMAZON.SearchQuery"
+            }
+          ],
+          "samples": [
+            "nero {query}",
+            "ei nero {query}",
+            "diga {query}",
+            "fala {query}",
+            "me diga {query}",
+            "pergunta {query}",
+            "pergunte {query}",
+            "quero {query}",
+            "manda {query}",
+            "por favor {query}"
+          ]
+        }
+      ],
+      "types": []
+    }
+  }
+}
