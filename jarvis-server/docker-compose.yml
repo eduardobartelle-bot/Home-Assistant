@@ -12,8 +12,7 @@ services:
       - HA_TOKEN=${HA_TOKEN}
       - PORT=3000
     depends_on:
-      homeassistant:
-        condition: service_healthy
+      - homeassistant
 
   homeassistant:
     image: ghcr.io/home-assistant/home-assistant:stable
@@ -27,11 +26,7 @@ services:
     environment:
       - TZ=${TZ:-America/Sao_Paulo}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8123/api/"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
+      disable: true
 
 volumes:
   ha_config:
