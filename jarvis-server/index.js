@@ -84,7 +84,7 @@ async function gerarAudio(texto) {
     const filepath = path.join(AUDIO_DIR, filename);
     fs.writeFileSync(filepath, response.data);
 
-    setTimeout(() => fs.unlink(filepath, () => {}), 60000);
+    setTimeout(() => fs.unlink(filepath, () => {}), 300000);
 
     return `${PUBLIC_URL}/audio/${filename}`;
   } catch (err) {
