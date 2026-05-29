@@ -277,7 +277,8 @@ app.post('/alexa', async (req, res) => {
 
     // Usuário abriu a skill ("Alexa, abrir nero home")
     if (requestType === 'LaunchRequest') {
-      return res.json(await responder('Olá, sou o Nero. Como posso ajudar?', false));
+      const audioUrl = await gerarAudio('Olá, sou o Nero. Como posso ajudar?');
+      return res.json(alexaLaunchResponse(audioUrl, 'Olá, sou o Nero. Como posso ajudar?'));
     }
 
     if (requestType === 'IntentRequest') {
@@ -339,6 +340,34 @@ async function responder(text, endSession) {
   const audioUrl = await gerarAudio(text);
   if (audioUrl) return alexaAudioResponse(audioUrl, text, endSession);
   return alexaResponse(text, endSession);
+}
+
+// Resposta do LaunchRequest: ativa o ComandoIntent com ElicitSlot já na abertura,
+// assim a próxima fala do usuário (sem âncora) já vai direto pro slot "query".
+function alexaLaunchResponse(audioUrl, fallbackText) {
+  const speech = audioUrl
+    ? { type: 'SSML', ssml: `<speak><audio src="${audioUrl}"/></speak>` }
+    : { type: 'PlainText', text: fallbackText };
+  return {
+    version: '1.0',
+    response: {
+      outputSpeech: speech,
+      card: { type: 'Simple', title: 'Nero', content: fallbackText },
+      reprompt: { outputSpeech: { type: 'PlainText', text: 'Estou aqui. O que deseja?' } },
+      directives: [
+        {
+          type: 'Dialog.ElicitSlot',
+          slotToElicit: 'query',
+          updatedIntent: {
+            name: 'ComandoIntent',
+            confirmationStatus: 'NONE',
+            slots: { query: { name: 'query', confirmationStatus: 'NONE' } },
+          },
+        },
+      ],
+      shouldEndSession: false,
+    },
+  };
 }
 
 // Diretiva que reabre o microfone e captura QUALQUER fala como o slot "query",
