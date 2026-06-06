@@ -449,6 +449,21 @@ app.post('/alexa', async (req, res) => {
   }
 });
 
+// Diagnóstico: lista as keys reais cadastradas pra TV (ou outro remote).
+app.get('/tuya/keys/:dispositivo', async (req, res) => {
+  try {
+    const disp = (req.params.dispositivo || 'tv').toLowerCase();
+    const deviceId = TUYA_DEVICES[disp];
+    const ir = TUYA_DEVICES.ir;
+    const remotesRes = await tuyaRequest('GET', `/v2.0/infrareds/${ir}/remotes`, null);
+    const remote = remotesRes.result?.find(r => r.remote_id === deviceId);
+    const keysRes = await tuyaRequest('GET', `/v2.0/infrareds/${ir}/remotes/${deviceId}/keys`, null);
+    return res.json({ remote, keys: keysRes.result });
+  } catch (err) {
+    return res.status(500).json({ error: err.message, detail: err.response?.data });
+  }
+});
+
 app.post('/home', async (req, res) => {
   try {
     const { endpoint, method = 'POST', data } = req.body;
