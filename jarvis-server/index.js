@@ -164,8 +164,14 @@ async function controlarTuya(dispositivo, comando, parametros) {
   const deviceId = TUYA_DEVICES[dispositivo.toLowerCase()];
   if (!deviceId) throw new Error(`Dispositivo "${dispositivo}" não encontrado. Use: tv, ar`);
 
+  // Busca os remotes do IR hub pra achar o category_id do dispositivo
+  const remotesRes = await tuyaRequest('GET', `/v2.0/infrareds/${TUYA_DEVICES.ir}/remotes`, null);
+  process.stdout.write(`Tuya remotes: ${JSON.stringify(remotesRes)}\n`);
+  const remote = remotesRes.result?.find(r => r.remote_id === deviceId);
+  const categoryId = remote?.category_id;
+
   const path = `/v2.0/infrareds/${TUYA_DEVICES.ir}/remotes/${deviceId}/command`;
-  const body = { code: comando, value: parametros ?? 1 };
+  const body = { code: comando, value: parametros ?? 1, ...(categoryId ? { category_id: categoryId } : {}) };
   process.stdout.write(`Tuya: ${dispositivo} → ${comando} (${JSON.stringify(body)}) path=${path}\n`);
   try {
     const result = await tuyaRequest('POST', path, body);
