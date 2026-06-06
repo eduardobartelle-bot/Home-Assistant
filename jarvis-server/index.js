@@ -119,6 +119,7 @@ async function getTuyaToken() {
     timeout: 5000,
   });
 
+  process.stdout.write(`Tuya token response: ${JSON.stringify(res.data)}\n`);
   tuyaToken = res.data.result.access_token;
   tuyaTokenExpiry = Date.now() + (res.data.result.expire_time - 60) * 1000;
   return tuyaToken;
