@@ -104,22 +104,22 @@ const TUYA_DEVICES = {
   ir: process.env.TUYA_DEVICE_IR || 'eb6c31fc5ea6a70e2bzy6w',
 };
 
-// Mapeia comandos amigáveis (do GPT) para as KEYS reais da TV TCL na Tuya.
+// Mapeia comandos amigáveis (do GPT) para o key_name real da TV TCL na Tuya.
 const TV_KEY_MAP = {
-  power: 'Power',
-  volume_up: 'Volume+',
-  volume_down: 'Volume-',
+  power: 'power',
+  volume_up: 'volume_up',
+  volume_down: 'volume down',
   mute: 'mute',
-  channel_up: 'Channel+',
-  channel_down: 'Channel-',
-  ok: 'OK',
-  menu: 'Menu',
-  up: 'Up',
-  down: 'Down',
-  left: 'Left',
-  right: 'Right',
-  back: 'Back',
-  home: 'Home',
+  channel_up: 'channel_up',
+  channel_down: 'channel_down',
+  ok: 'ok',
+  menu: 'menu',
+  up: 'navigate_up',
+  down: 'navigate_down',
+  left: 'navigate_left',
+  right: 'navigate_right',
+  back: 'back',
+  home: 'homepage',
   input: 'input',
 };
 
@@ -196,9 +196,22 @@ async function controlarTuya(dispositivo, comando, parametros) {
     // TV / remote padrão: usa key (+ category_id e remote_index)
     const remotesRes = await tuyaRequest('GET', `/v2.0/infrareds/${ir}/remotes`, null);
     const remote = remotesRes.result?.find(r => r.remote_id === deviceId);
+
+    // Busca a lista de keys reais pra achar o key_id correto (sem ele a Tuya
+    // aceita mas não dispara o sinal certo).
+    const keysRes = await tuyaRequest('GET', `/v2.0/infrareds/${ir}/remotes/${deviceId}/keys`, null);
+    const keyName = TV_KEY_MAP[comando.toLowerCase()] || comando;
+    const entry = keysRes.result?.key_list?.find(
+      k => k.key_name === keyName || k.key === comando || k.key_name === comando
+    );
+
     path = `/v2.0/infrareds/${ir}/remotes/${deviceId}/command`;
-    const key = TV_KEY_MAP[comando.toLowerCase()] || comando;
-    body = { category_id: remote?.category_id, remote_index: remote?.remote_index, key };
+    body = {
+      category_id: remote?.category_id,
+      remote_index: remote?.remote_index,
+      key: entry?.key,
+      key_id: entry?.key_id,
+    };
   }
 
   process.stdout.write(`Tuya: ${dispositivo} → ${comando} (${JSON.stringify(body)}) path=${path}\n`);
