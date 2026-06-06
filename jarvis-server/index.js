@@ -154,10 +154,12 @@ async function controlarTuya(dispositivo, comando, parametros) {
   const deviceId = TUYA_DEVICES[dispositivo.toLowerCase()];
   if (!deviceId) throw new Error(`Dispositivo "${dispositivo}" não encontrado. Use: tv, ar`);
 
-  // Comandos IR — envia código de função pro controle infravermelho
   const path = `/v2.0/infrareds/${TUYA_DEVICES.ir}/remotes/${deviceId}/command`;
   const body = { code: comando, value: parametros ?? 1 };
-  return await tuyaRequest('POST', path, body);
+  process.stdout.write(`Tuya: ${dispositivo} → ${comando} (${JSON.stringify(body)}) path=${path}\n`);
+  const result = await tuyaRequest('POST', path, body);
+  process.stdout.write(`Tuya resultado: ${JSON.stringify(result)}\n`);
+  return result;
 }
 
 // ---------- Ferramentas do GPT ----------
