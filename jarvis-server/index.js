@@ -137,10 +137,11 @@ async function getTuyaToken() {
 async function tuyaRequest(method, path, body) {
   const token = await getTuyaToken();
   const t = Date.now().toString();
+  const nonce = '';
   const bodyStr = body ? JSON.stringify(body) : '';
   const contentHash = crypto.createHash('sha256').update(bodyStr).digest('hex');
-  const stringToSign = [method, contentHash, '', path].join('\n');
-  const str = TUYA_CLIENT_ID + token + t + stringToSign;
+  const stringToSign = [method.toUpperCase(), contentHash, '', path].join('\n');
+  const str = TUYA_CLIENT_ID + token + t + nonce + stringToSign;
   const sign = crypto.createHmac('sha256', TUYA_CLIENT_SECRET).update(str).digest('hex').toUpperCase();
 
   const res = await axios({
@@ -151,10 +152,11 @@ async function tuyaRequest(method, path, body) {
       access_token: token,
       sign,
       t,
+      nonce,
       sign_method: 'HMAC-SHA256',
       'Content-Type': 'application/json',
     },
-    data: body,
+    data: body || undefined,
     timeout: 5000,
   });
   return res.data;
