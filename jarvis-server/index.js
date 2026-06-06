@@ -104,6 +104,25 @@ const TUYA_DEVICES = {
   ir: process.env.TUYA_DEVICE_IR || 'eb6c31fc5ea6a70e2bzy6w',
 };
 
+// Mapeia comandos amigáveis (do GPT) para as KEYS reais da TV TCL na Tuya.
+const TV_KEY_MAP = {
+  power: 'Power',
+  volume_up: 'Volume+',
+  volume_down: 'Volume-',
+  mute: 'mute',
+  channel_up: 'Channel+',
+  channel_down: 'Channel-',
+  ok: 'OK',
+  menu: 'Menu',
+  up: 'Up',
+  down: 'Down',
+  left: 'Left',
+  right: 'Right',
+  back: 'Back',
+  home: 'Home',
+  input: 'input',
+};
+
 let tuyaToken = null;
 let tuyaTokenExpiry = 0;
 
@@ -178,7 +197,8 @@ async function controlarTuya(dispositivo, comando, parametros) {
     const remotesRes = await tuyaRequest('GET', `/v2.0/infrareds/${ir}/remotes`, null);
     const remote = remotesRes.result?.find(r => r.remote_id === deviceId);
     path = `/v2.0/infrareds/${ir}/remotes/${deviceId}/command`;
-    body = { category_id: remote?.category_id, remote_index: remote?.remote_index, key: comando };
+    const key = TV_KEY_MAP[comando.toLowerCase()] || comando;
+    body = { category_id: remote?.category_id, remote_index: remote?.remote_index, key };
   }
 
   process.stdout.write(`Tuya: ${dispositivo} → ${comando} (${JSON.stringify(body)}) path=${path}\n`);
