@@ -111,11 +111,20 @@ async function getTuyaToken() {
   if (tuyaToken && Date.now() < tuyaTokenExpiry) return tuyaToken;
 
   const t = Date.now().toString();
-  const str = TUYA_CLIENT_ID + t;
+  const nonce = '';
+  const contentHash = crypto.createHash('sha256').update('').digest('hex');
+  const stringToSign = ['GET', contentHash, '', '/v1.0/token?grant_type=1'].join('\n');
+  const str = TUYA_CLIENT_ID + t + nonce + stringToSign;
   const sign = crypto.createHmac('sha256', TUYA_CLIENT_SECRET).update(str).digest('hex').toUpperCase();
 
   const res = await axios.get(`${TUYA_BASE_URL}/v1.0/token?grant_type=1`, {
-    headers: { client_id: TUYA_CLIENT_ID, sign, t, sign_method: 'HMAC-SHA256' },
+    headers: {
+      client_id: TUYA_CLIENT_ID,
+      sign,
+      t,
+      sign_method: 'HMAC-SHA256',
+      nonce,
+    },
     timeout: 5000,
   });
 
