@@ -32,7 +32,8 @@ const SYSTEM_PROMPT =
   'sem repetir o que já foi dito, respeitando o mesmo limite de caracteres. ' +
   'Você lembra do contexto da conversa: se o usuário disser "apaga ela" logo após falar de uma luz, ' +
   'entenda a que dispositivo ele se refere a partir das mensagens anteriores. ' +
-  'Quando o usuário pedir para controlar algum dispositivo da casa, use a função controlar_home_assistant. ' +
+  'Quando o usuário pedir para controlar TV ou ar condicionado, use a função controlar_tuya. ' +
+  'Quando o usuário pedir para controlar luzes ou outros dispositivos do Home Assistant, use controlar_home_assistant. ' +
   'Após executar um comando, confirme brevemente o que foi feito.';
 
 // ---------- Memória de conversa (Supabase, com fallback em memória local) ----------
@@ -92,7 +93,76 @@ async function salvarHistorico(userId, mensagens) {
   }
 }
 
-// ---------- Ferramenta de controle do Home Assistant ----------
+// ---------- Tuya Cloud API ----------
+const TUYA_CLIENT_ID = process.env.TUYA_CLIENT_ID;
+const TUYA_CLIENT_SECRET = process.env.TUYA_CLIENT_SECRET;
+const TUYA_BASE_URL = 'https://openapi.tuyaus.com';
+
+const TUYA_DEVICES = {
+  tv: process.env.TUYA_DEVICE_TV || 'eb3eba3160f1409b92ni2k',
+  ar: process.env.TUYA_DEVICE_AR || 'eb15d262bdb776c854n2ja',
+  ir: process.env.TUYA_DEVICE_IR || 'eb6c31fc5ea6a70e2bzy6w',
+};
+
+let tuyaToken = null;
+let tuyaTokenExpiry = 0;
+
+async function getTuyaToken() {
+  if (tuyaToken && Date.now() < tuyaTokenExpiry) return tuyaToken;
+
+  const t = Date.now().toString();
+  const str = TUYA_CLIENT_ID + t;
+  const sign = crypto.createHmac('sha256', TUYA_CLIENT_SECRET).update(str).digest('hex').toUpperCase();
+
+  const res = await axios.get(`${TUYA_BASE_URL}/v1.0/token?grant_type=1`, {
+    headers: { client_id: TUYA_CLIENT_ID, sign, t, sign_method: 'HMAC-SHA256' },
+    timeout: 5000,
+  });
+
+  tuyaToken = res.data.result.access_token;
+  tuyaTokenExpiry = Date.now() + (res.data.result.expire_time - 60) * 1000;
+  return tuyaToken;
+}
+
+async function tuyaRequest(method, path, body) {
+  const token = await getTuyaToken();
+  const t = Date.now().toString();
+  const bodyStr = body ? JSON.stringify(body) : '';
+  const contentHash = crypto.createHash('sha256').update(bodyStr).digest('hex');
+  const stringToSign = [method, contentHash, '', path].join('\n');
+  const str = TUYA_CLIENT_ID + token + t + stringToSign;
+  const sign = crypto.createHmac('sha256', TUYA_CLIENT_SECRET).update(str).digest('hex').toUpperCase();
+
+  const res = await axios({
+    method,
+    url: `${TUYA_BASE_URL}${path}`,
+    headers: {
+      client_id: TUYA_CLIENT_ID,
+      access_token: token,
+      sign,
+      t,
+      sign_method: 'HMAC-SHA256',
+      'Content-Type': 'application/json',
+    },
+    data: body,
+    timeout: 5000,
+  });
+  return res.data;
+}
+
+async function controlarTuya(dispositivo, comando, parametros) {
+  const deviceId = TUYA_DEVICES[dispositivo.toLowerCase()];
+  if (!deviceId) throw new Error(`Dispositivo "${dispositivo}" não encontrado. Use: tv, ar`);
+
+  const path = `/v2.0/infrareds/${TUYA_DEVICES.ir}/remotes/${deviceId}/command`;
+  const body = { code: comando, value: parametros ?? 1 };
+  process.stdout.write(`Tuya: ${dispositivo} → ${comando} (${JSON.stringify(body)}) path=${path}\n`);
+  const result = await tuyaRequest('POST', path, body);
+  process.stdout.write(`Tuya resultado: ${JSON.stringify(result)}\n`);
+  return result;
+}
+
+// ---------- Ferramentas do GPT ----------
 const tools = [
   {
     type: 'function',
@@ -103,23 +173,32 @@ const tools = [
       parameters: {
         type: 'object',
         properties: {
-          endpoint: {
-            type: 'string',
-            description:
-              'Endpoint da API REST do Home Assistant. Exemplos: "services/light/turn_on", "services/light/turn_off", "services/switch/toggle", "services/climate/set_temperature", "states/light.sala"',
-          },
-          method: {
-            type: 'string',
-            enum: ['GET', 'POST'],
-            description: 'Método HTTP. Use GET para consultar estado, POST para executar ação.',
-          },
-          data: {
-            type: 'object',
-            description:
-              'Dados do comando. Exemplos: {"entity_id": "light.sala"} ou {"entity_id": "climate.quarto", "temperature": 22}',
-          },
+          endpoint: { type: 'string', description: 'Endpoint da API REST do Home Assistant.' },
+          method: { type: 'string', enum: ['GET', 'POST'] },
+          data: { type: 'object' },
         },
         required: ['endpoint', 'method'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'controlar_tuya',
+      description:
+        'Controla dispositivos via controle infravermelho Tuya (TV e Ar Condicionado). ' +
+        'Use para ligar/desligar TV, mudar canal, ajustar volume, ligar/desligar ar condicionado, mudar temperatura e modo do AC. ' +
+        'Dispositivos disponíveis: "tv" (TCL), "ar" (Ar condicionado). ' +
+        'Comandos TV: power (ligar/desligar), volume_up, volume_down, mute, channel_up, channel_down. ' +
+        'Comandos AR: power (ligar/desligar), temp_up, temp_down, mode (cool/heat/fan/auto), wind_speed (1-3).',
+      parameters: {
+        type: 'object',
+        properties: {
+          dispositivo: { type: 'string', enum: ['tv', 'ar'], description: 'Qual dispositivo controlar.' },
+          comando: { type: 'string', description: 'Código do comando IR a enviar.' },
+          parametros: { description: 'Valor opcional do comando (ex: temperatura, velocidade).' },
+        },
+        required: ['dispositivo', 'comando'],
       },
     },
   },
@@ -231,7 +310,11 @@ async function conversarComGPT(userId, userText) {
       let resultado;
 
       try {
-        resultado = await chamarHomeAssistant(args.endpoint, args.method, args.data);
+        if (toolCall.function.name === 'controlar_tuya') {
+          resultado = await controlarTuya(args.dispositivo, args.comando, args.parametros);
+        } else {
+          resultado = await chamarHomeAssistant(args.endpoint, args.method, args.data);
+        }
       } catch (err) {
         resultado = { erro: err.message };
       }

@@ -19,6 +19,11 @@ services:
       - PUBLIC_URL=${PUBLIC_URL}
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_KEY=${SUPABASE_KEY}
+      - TUYA_CLIENT_ID=${TUYA_CLIENT_ID}
+      - TUYA_CLIENT_SECRET=${TUYA_CLIENT_SECRET}
+      - TUYA_DEVICE_TV=${TUYA_DEVICE_TV}
+      - TUYA_DEVICE_AR=${TUYA_DEVICE_AR}
+      - TUYA_DEVICE_IR=${TUYA_DEVICE_IR}
     depends_on:
       - homeassistant
 
