@@ -157,9 +157,15 @@ async function controlarTuya(dispositivo, comando, parametros) {
   const path = `/v2.0/infrareds/${TUYA_DEVICES.ir}/remotes/${deviceId}/command`;
   const body = { code: comando, value: parametros ?? 1 };
   process.stdout.write(`Tuya: ${dispositivo} → ${comando} (${JSON.stringify(body)}) path=${path}\n`);
-  const result = await tuyaRequest('POST', path, body);
-  process.stdout.write(`Tuya resultado: ${JSON.stringify(result)}\n`);
-  return result;
+  try {
+    const result = await tuyaRequest('POST', path, body);
+    process.stdout.write(`Tuya resultado: ${JSON.stringify(result)}\n`);
+    return result;
+  } catch (err) {
+    const detail = err.response?.data ? JSON.stringify(err.response.data) : err.message;
+    process.stdout.write(`Tuya ERRO: ${detail}\n`);
+    throw err;
+  }
 }
 
 // ---------- Ferramentas do GPT ----------
