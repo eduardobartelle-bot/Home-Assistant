@@ -166,14 +166,21 @@ async function controlarTuya(dispositivo, comando, parametros) {
   const deviceId = TUYA_DEVICES[dispositivo.toLowerCase()];
   if (!deviceId) throw new Error(`Dispositivo "${dispositivo}" não encontrado. Use: tv, ar`);
 
-  // Busca os remotes do IR hub pra achar o category_id do dispositivo
-  const remotesRes = await tuyaRequest('GET', `/v2.0/infrareds/${TUYA_DEVICES.ir}/remotes`, null);
-  process.stdout.write(`Tuya remotes: ${JSON.stringify(remotesRes)}\n`);
-  const remote = remotesRes.result?.find(r => r.remote_id === deviceId);
-  const categoryId = remote?.category_id;
+  const ir = TUYA_DEVICES.ir;
+  let path, body;
 
-  const path = `/v2.0/infrareds/${TUYA_DEVICES.ir}/remotes/${deviceId}/command`;
-  const body = { code: comando, value: parametros ?? 1, ...(categoryId ? { category_id: categoryId } : {}) };
+  if (dispositivo.toLowerCase() === 'ar') {
+    // Ar condicionado: endpoint dedicado, usa code + value
+    path = `/v2.0/infrareds/${ir}/air-conditioners/${deviceId}/command`;
+    body = { code: comando, value: parametros ?? 1 };
+  } else {
+    // TV / remote padrão: usa key (+ category_id e remote_index)
+    const remotesRes = await tuyaRequest('GET', `/v2.0/infrareds/${ir}/remotes`, null);
+    const remote = remotesRes.result?.find(r => r.remote_id === deviceId);
+    path = `/v2.0/infrareds/${ir}/remotes/${deviceId}/command`;
+    body = { category_id: remote?.category_id, remote_index: remote?.remote_index, key: comando };
+  }
+
   process.stdout.write(`Tuya: ${dispositivo} → ${comando} (${JSON.stringify(body)}) path=${path}\n`);
   try {
     const result = await tuyaRequest('POST', path, body);
@@ -210,17 +217,20 @@ const tools = [
     function: {
       name: 'controlar_tuya',
       description:
-        'Controla dispositivos via controle infravermelho Tuya (TV e Ar Condicionado). ' +
-        'Use para ligar/desligar TV, mudar canal, ajustar volume, ligar/desligar ar condicionado, mudar temperatura e modo do AC. ' +
-        'Dispositivos disponíveis: "tv" (TCL), "ar" (Ar condicionado). ' +
-        'Comandos TV: power (ligar/desligar), volume_up, volume_down, mute, channel_up, channel_down. ' +
-        'Comandos AR: power (ligar/desligar), temp_up, temp_down, mode (cool/heat/fan/auto), wind_speed (1-3).',
+        'Controla TV e Ar Condicionado via controle infravermelho Tuya.\n' +
+        'TV (dispositivo="tv") — comando deve ser uma destas KEYS: ' +
+        'power, volume_up, volume_down, mute, channel_up, channel_down, ok, menu, up, down, left, right. ' +
+        'Para TV não use o campo parametros.\n' +
+        'AR CONDICIONADO (dispositivo="ar") — comando deve ser um destes CODES com o campo parametros: ' +
+        'power (parametros: 1=liga, 0=desliga), temp (parametros: 16 a 30 graus), ' +
+        'mode (parametros: 0=refrigerar, 1=aquecer, 2=automático, 3=ventilar, 4=desumidificar), ' +
+        'wind (parametros: 0=auto, 1=baixa, 2=média, 3=alta).',
       parameters: {
         type: 'object',
         properties: {
           dispositivo: { type: 'string', enum: ['tv', 'ar'], description: 'Qual dispositivo controlar.' },
-          comando: { type: 'string', description: 'Código do comando IR a enviar.' },
-          parametros: { description: 'Valor opcional do comando (ex: temperatura, velocidade).' },
+          comando: { type: 'string', description: 'A key (TV) ou code (AR) do comando.' },
+          parametros: { type: 'number', description: 'Valor do comando (só para o ar condicionado).' },
         },
         required: ['dispositivo', 'comando'],
       },
