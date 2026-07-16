@@ -33,8 +33,9 @@ const SYSTEM_PROMPT =
   'Você lembra do contexto da conversa: se o usuário disser "apaga ela" logo após falar de uma luz, ' +
   'entenda a que dispositivo ele se refere a partir das mensagens anteriores. ' +
   'Quando o usuário pedir para controlar TV ou ar condicionado, use a função controlar_tuya. ' +
-  'Quando o usuário pedir para controlar luzes ou outros dispositivos do Home Assistant, use controlar_home_assistant. ' +
-  'Após executar um comando, confirme brevemente o que foi feito.';
+  'Quando o usuário pedir para controlar luzes, cenas ou outros dispositivos do Home Assistant, use controlar_home_assistant. ' +
+  'Após executar um comando, confirme brevemente o que foi feito. ' +
+  'Se uma ferramenta retornar erro, NUNCA diga que o comando foi executado: avise que não conseguiu e explique o motivo em palavras simples.';
 
 // ---------- Memória de conversa (Supabase, com fallback em memória local) ----------
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -126,6 +127,19 @@ const TV_KEY_MAP = {
 let tuyaToken = null;
 let tuyaTokenExpiry = 0;
 
+// A Tuya responde HTTP 200 até quando falha (success:false) — sem esta checagem
+// os erros passam batido e o GPT acha que o comando funcionou.
+function verificarRespostaTuya(data) {
+  if (data && data.success === false) {
+    if (data.code === 28841002) {
+      throw new Error(
+        'A assinatura gratuita do Tuya IoT Core expirou de novo. Renove em platform.tuya.com, em Cloud, IoT Core, Extend Trial Period. É grátis e vale seis meses.'
+      );
+    }
+    throw new Error(`A Tuya recusou o comando: ${data.msg} (código ${data.code})`);
+  }
+}
+
 async function getTuyaToken() {
   if (tuyaToken && Date.now() < tuyaTokenExpiry) return tuyaToken;
 
@@ -148,6 +162,7 @@ async function getTuyaToken() {
   });
 
   process.stdout.write(`Tuya token response: ${JSON.stringify(res.data)}\n`);
+  verificarRespostaTuya(res.data);
   tuyaToken = res.data.result.access_token;
   tuyaTokenExpiry = Date.now() + (res.data.result.expire_time - 60) * 1000;
   return tuyaToken;
@@ -178,6 +193,7 @@ async function tuyaRequest(method, path, body) {
     data: body || undefined,
     timeout: 5000,
   });
+  verificarRespostaTuya(res.data);
   return res.data;
 }
 
@@ -233,13 +249,20 @@ const tools = [
     function: {
       name: 'controlar_home_assistant',
       description:
-        'Executa um comando no Home Assistant. Use para ligar/desligar luzes, controlar temperatura, verificar sensores, acionar cenas e qualquer outro dispositivo doméstico.',
+        'Executa um comando no Home Assistant. Use para ligar/desligar luzes, ativar cenas, verificar sensores e qualquer dispositivo da lista de entidades do prompt.\n' +
+        'Para acionar: endpoint "services/<dominio>/<servico>" com method POST e data {"entity_id": "<id exato da lista>"}. ' +
+        'Exemplos: services/switch/turn_off + {"entity_id":"switch.luz_sala_mesa"}; services/scene/turn_on + {"entity_id":"scene.modo_cinema"}; services/light/turn_on + {"entity_id":"light.x"}.\n' +
+        'Para consultar estado: endpoint "states/<entity_id>" com method GET.\n' +
+        'Use SEMPRE um entity_id exato da lista de entidades — nunca invente.',
       parameters: {
         type: 'object',
         properties: {
-          endpoint: { type: 'string', description: 'Endpoint da API REST do Home Assistant.' },
+          endpoint: {
+            type: 'string',
+            description: 'Caminho da API REST, ex.: "services/switch/turn_off" ou "states/switch.luz_sala_mesa".',
+          },
           method: { type: 'string', enum: ['GET', 'POST'] },
-          data: { type: 'object' },
+          data: { type: 'object', description: 'Para services: {"entity_id": "<id da lista>"}.' },
         },
         required: ['endpoint', 'method'],
       },
@@ -344,17 +367,57 @@ async function chamarHomeAssistant(endpoint, method, data) {
       'Content-Type': 'application/json',
     },
     data,
+    timeout: 5000,
   });
 
   return response.data;
 }
 
+// ---------- Inventário de entidades pro GPT ----------
+// O GPT não adivinha entity_ids: a cada conversa enviamos a lista real de
+// dispositivos do Home Assistant no prompt. Cache curto pra não pesar o
+// orçamento de 8s da Alexa.
+const DOMINIOS_RELEVANTES = new Set([
+  'light', 'switch', 'scene', 'script', 'climate', 'fan', 'cover',
+  'media_player', 'lock', 'vacuum', 'todo', 'weather', 'sensor', 'binary_sensor',
+]);
+const ENTIDADES_CACHE_MS = 30000;
+const ENTIDADES_MAX = 80;
+let entidadesCache = { texto: '', expira: 0 };
+
+async function listarEntidadesHA() {
+  if (Date.now() < entidadesCache.expira) return entidadesCache.texto;
+  try {
+    const states = await chamarHomeAssistant('states', 'GET');
+    const texto = states
+      .filter(e => DOMINIOS_RELEVANTES.has(e.entity_id.split('.')[0]))
+      .slice(0, ENTIDADES_MAX)
+      .map(e => `${e.entity_id} | ${e.attributes?.friendly_name || ''} | ${e.state}`)
+      .join('\n');
+    entidadesCache = { texto, expira: Date.now() + ENTIDADES_CACHE_MS };
+    return texto;
+  } catch (err) {
+    process.stdout.write(`HA entidades ERRO: ${err.message}\n`);
+    return '';
+  }
+}
+
 // ---------- Conversa com o GPT (com memória + function calling) ----------
 async function conversarComGPT(userId, userText) {
-  const historico = await carregarHistorico(userId);
+  const [historico, entidades] = await Promise.all([carregarHistorico(userId), listarEntidadesHA()]);
+
+  let systemPrompt = SYSTEM_PROMPT;
+  if (entidades) {
+    systemPrompt +=
+      '\n\nEntidades disponíveis no Home Assistant (entity_id | nome | estado atual):\n' +
+      entidades +
+      '\nPara controlar, chame controlar_home_assistant com endpoint "services/<dominio>/<servico>" ' +
+      '(o domínio é o prefixo do entity_id, ex.: switch → services/switch/turn_off), method "POST" ' +
+      'e data {"entity_id": "<entity_id exato da lista>"}. Nunca invente entity_id fora da lista.';
+  }
 
   const messages = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: systemPrompt },
     ...historico,
     { role: 'user', content: userText },
   ];
