@@ -253,7 +253,8 @@ const tools = [
         'Para acionar: endpoint "services/<dominio>/<servico>" com method POST e data {"entity_id": "<id exato da lista>"}. ' +
         'Exemplos: services/switch/turn_off + {"entity_id":"switch.luz_sala_mesa"}; services/scene/turn_on + {"entity_id":"scene.modo_cinema"}; services/light/turn_on + {"entity_id":"light.x"}.\n' +
         'Para consultar estado: endpoint "states/<entity_id>" com method GET.\n' +
-        'Use SEMPRE um entity_id exato da lista de entidades — nunca invente.',
+        'Use SEMPRE um entity_id exato da lista de entidades — nunca invente.\n' +
+        'Resultado {"sucesso":true} significa que o comando FOI executado, mesmo que "resposta" venha vazia; só considere falha se vier o campo "erro".',
       parameters: {
         type: 'object',
         properties: {
@@ -443,7 +444,11 @@ async function conversarComGPT(userId, userText) {
         if (toolCall.function.name === 'controlar_tuya') {
           resultado = await controlarTuya(args.dispositivo, args.comando, args.parametros);
         } else {
-          resultado = await chamarHomeAssistant(args.endpoint, args.method, args.data);
+          const resposta = await chamarHomeAssistant(args.endpoint, args.method, args.data);
+          // HTTP 200 do HA = comando aceito. Dispositivos via nuvem (ex.: Tuya)
+          // respondem com lista vazia porque o estado confirma com atraso; sem
+          // este embrulho o GPT interpretava "[]" como falha.
+          resultado = { sucesso: true, resposta };
         }
       } catch (err) {
         resultado = { erro: err.message };
